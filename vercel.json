@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/updateOwners.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/updateOwners",
+      "dest": "api/updateOwners.js"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/updateOwners",
+      "schedule": "0 * * * *"
+    }
+  ]
+}
