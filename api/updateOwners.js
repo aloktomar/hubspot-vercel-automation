@@ -1,12 +1,8 @@
-// HubSpot API configuration
-// const API_KEY = 'pat-na1-311f30aa-fe1e-4a3f-99a0-f7dd1603d535';
 const axios = require('axios');
 
-// HubSpot API configuration
 const API_KEY = process.env.HUBSPOT_API_KEY;
 const BASE_URL = 'https://api.hubapi.com';
 
-// Helper function to make API requests
 async function makeRequest(endpoint, method = 'GET', data = null) {
   const url = `${BASE_URL}${endpoint}`;
   const headers = {
@@ -15,6 +11,7 @@ async function makeRequest(endpoint, method = 'GET', data = null) {
   };
   try {
     const response = await axios({ method, url, headers, data });
+    console.log(`Request to ${endpoint} successful`);
     return response.data;
   } catch (error) {
     console.error(`Error making request to ${endpoint}:`, error.message);
@@ -26,25 +23,14 @@ async function makeRequest(endpoint, method = 'GET', data = null) {
   }
 }
 
-// Get recent deals
-async function getRecentDeals(since) {
-  let deals = [];
-  let after = undefined;
-  while (true) {
-    const endpoint = `/crm/v3/objects/deals?limit=100${after ? `&after=${after}` : ''}&properties=dealname,hubspot_owner_id,email,createdate,lastmodifieddate`;
-    const response = await makeRequest(endpoint);
-    const recentDeals = response.results.filter(deal => new Date(deal.properties.lastmodifieddate) > since);
-    deals = deals.concat(recentDeals);
-    if (!response.paging || !response.paging.next || recentDeals.length < response.results.length) {
-      break;
-    }
-    after = response.paging.next.after;
-  }
-  return deals;
+async function getDealById(dealId) {
+  console.log(`Fetching deal with ID: ${dealId}`);
+  const endpoint = `/crm/v3/objects/deals/${dealId}?properties=dealname,hubspot_owner_id,email`;
+  return makeRequest(endpoint);
 }
 
-// Get contact by email
 async function getContactByEmail(email) {
+  console.log(`Searching for contact with email: ${email}`);
   const endpoint = `/crm/v3/objects/contacts/search`;
   const data = {
     filterGroups: [{
@@ -60,8 +46,8 @@ async function getContactByEmail(email) {
   return response.results[0];
 }
 
-// Update contact owner
 async function updateContactOwner(contactId, ownerId) {
+  console.log(`Updating contact ${contactId} with new owner ${ownerId}`);
   const endpoint = `/crm/v3/objects/contacts/${contactId}`;
   const data = {
     properties: {
@@ -71,66 +57,65 @@ async function updateContactOwner(contactId, ownerId) {
   await makeRequest(endpoint, 'PATCH', data);
 }
 
-// Main function to sync deal owners with contact owners
-async function syncDealContactOwners(since) {
+async function syncDealContactOwner(dealId) {
   try {
-    console.log(`Fetching deals modified since ${since.toISOString()}`);
-    const deals = await getRecentDeals(since);
-    console.log(`Found ${deals.length} recently modified deals`);
+    console.log(`Processing deal ${dealId}`);
+    const deal = await getDealById(dealId);
+    console.log(`Deal data:`, JSON.stringify(deal, null, 2));
 
-    let updatedCount = 0;
+    const dealEmail = deal.properties.email;
+    const dealOwner = deal.properties.hubspot_owner_id;
 
-    for (const deal of deals) {
-      const dealId = deal.id;
-      const dealEmail = deal.properties.email;
-      const dealOwner = deal.properties.hubspot_owner_id;
-
-      if (!dealEmail || !dealOwner) {
-        console.log(`Skipping deal ${dealId}: Missing email or owner`);
-        continue;
-      }
-
-      console.log(`Processing deal ${dealId} with email ${dealEmail}`);
-
-      const contact = await getContactByEmail(dealEmail);
-
-      if (!contact) {
-        console.log(`No contact found for email ${dealEmail}`);
-        continue;
-      }
-
-      const contactId = contact.id;
-      const currentContactOwner = contact.properties.hubspot_owner_id;
-
-      if (dealOwner !== currentContactOwner) {
-        console.log(`Updating contact ${contactId} owner from ${currentContactOwner || 'none'} to ${dealOwner}`);
-        await updateContactOwner(contactId, dealOwner);
-        updatedCount++;
-      } else {
-        console.log(`No owner update needed for contact ${contactId}`);
-      }
+    if (!dealEmail || !dealOwner) {
+      console.log(`Skipping deal ${dealId}: Missing email (${dealEmail}) or owner (${dealOwner})`);
+      return { updated: false, reason: 'Missing email or owner' };
     }
 
-    console.log(`Process completed. Updated ${updatedCount} contacts.`);
-    return { updatedCount, dealsProcessed: deals.length };
+    const contact = await getContactByEmail(dealEmail);
+
+    if (!contact) {
+      console.log(`No contact found for email ${dealEmail}`);
+      return { updated: false, reason: 'No contact found' };
+    }
+
+    console.log(`Contact data:`, JSON.stringify(contact, null, 2));
+
+    const contactId = contact.id;
+    const currentContactOwner = contact.properties.hubspot_owner_id;
+
+    if (dealOwner !== currentContactOwner) {
+      console.log(`Updating contact ${contactId} owner from ${currentContactOwner || 'none'} to ${dealOwner}`);
+      await updateContactOwner(contactId, dealOwner);
+      return { updated: true, contactId, oldOwner: currentContactOwner, newOwner: dealOwner };
+    } else {
+      console.log(`No owner update needed for contact ${contactId}`);
+      return { updated: false, reason: 'Owner already matches' };
+    }
   } catch (error) {
-    console.error('Error in syncDealContactOwners:', error.message);
+    console.error('Error in syncDealContactOwner:', error.message);
     throw error;
   }
 }
 
-// Vercel serverless function
 module.exports = async (req, res) => {
-  try {
-    // Check if it's a scheduled run or manual trigger
-    const isScheduled = req.headers['x-vercel-cron'] === '0 * * * *'; // Assuming hourly cron job
-    const since = isScheduled
-      ? new Date(Date.now() - 3600000) // 1 hour ago for scheduled runs
-      : new Date(0); // Beginning of time for manual runs
+  console.log('Webhook received:', JSON.stringify(req.body, null, 2));
 
-    const result = await syncDealContactOwners(since);
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  try {
+    const { object_id } = req.body;
+
+    if (!object_id) {
+      return res.status(400).json({ error: 'Missing deal ID' });
+    }
+
+    const result = await syncDealContactOwner(object_id);
+    console.log('Sync result:', result);
     res.status(200).json(result);
   } catch (error) {
+    console.error('Error processing webhook:', error);
     res.status(500).json({ error: error.message });
   }
 };
