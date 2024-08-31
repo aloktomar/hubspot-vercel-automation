@@ -1,21 +1,16 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "api/updateOwners.js",
-      "use": "@vercel/node"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/api/updateOwners",
-      "dest": "api/updateOwners.js"
-    }
-  ],
-  "crons": [
-    {
-      "path": "/api/updateOwners",
-      "schedule": "0 * * * *"
-    }
-  ]
+  "name": "hubspot-deal-contact-sync",
+  "version": "1.0.0",
+  "description": "Sync HubSpot deal owners with contact owners",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "axios": "^0.21.1",
+    "express": "^4.17.1"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
 }
