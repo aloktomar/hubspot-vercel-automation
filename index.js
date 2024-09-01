@@ -1,51 +1,34 @@
 const express = require('express');
-const { syncDealContactOwner, syncAllDealContactOwners } = require('./api/updateOwners');
+const { syncDealContactOwner, syncAllDealContactOwners, syncChangedDeals } = require('./api/updateOwners');
 const app = express();
 const port = process.env.PORT || 3000;
 
 app.use(express.json());
 
-app.post('/webhook', async (req, res) => {
-    console.log('Webhook received:', JSON.stringify(req.body, null, 2));
-    try {
-        const { object_id } = req.body;
+// ... (keep existing endpoints)
 
-        if (!object_id) {
-            return res.status(400).json({ error: 'Missing deal ID' });
-        }
-        const result = await syncDealContactOwner(object_id);
-        console.log('Sync result:', result);
-        res.status(200).json(result);
+// Add a new endpoint to manually trigger the check for changed deals
+app.post('/check-deal-changes', async (req, res) => {
+    console.log('Manually checking for deal changes');
+    try {
+        await syncChangedDeals();
+        res.status(200).json({ message: 'Check completed' });
     } catch (error) {
-        console.error('Error processing webhook:', error);
+        console.error('Error checking for deal changes:', error);
         res.status(500).json({ error: error.message });
     }
 });
 
-app.post('/sync-all-deals', async (req, res) => {
-    console.log('Starting sync for all deals');
+// Set up periodic polling
+const POLLING_INTERVAL = 5 * 60 * 1000; // 5 minutes in milliseconds
+setInterval(async () => {
+    console.log('Running scheduled check for deal changes');
     try {
-        const results = await syncAllDealContactOwners();
-        console.log('Sync completed');
-        res.status(200).json(results);
+        await syncChangedDeals();
     } catch (error) {
-        console.error('Error syncing all deals:', error);
-        res.status(500).json({ error: error.message });
+        console.error('Error in scheduled deal change check:', error);
     }
-});
-
-app.post('/sync-deal/:dealId', async (req, res) => {
-    const { dealId } = req.params;
-    console.log(`Manually syncing deal ${dealId}`);
-    try {
-        const result = await syncDealContactOwner(dealId);
-        console.log('Sync result:', JSON.stringify(result, null, 2));
-        res.status(200).json(result);
-    } catch (error) {
-        console.error('Error syncing deal:', error);
-        res.status(500).json({ error: error.message });
-    }
-});
+}, POLLING_INTERVAL);
 
 app.listen(port, () => {
     console.log(`Server running on port ${port}`);
