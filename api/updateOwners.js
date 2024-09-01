@@ -1,59 +1,64 @@
-const axios = require('axios');
-const API_KEY = process.env.HUBSPOT_API_KEY;
-const BASE_URL = 'https://api.hubapi.com';
+const express = require('express');
+const { syncDealContactOwner, syncAllDealContactOwners, syncChangedDeals } = require('./api/updateOwners');
+const app = express();
+const port = process.env.PORT || 3000;
 
-// ... (keep existing functions: makeRequest, getDealById, getContactByEmail, updateContactOwner, syncDealContactOwner)
+app.use(express.json());
 
-async function getAllDeals(limit = 100, after = undefined) {
-  console.log(`Fetching deals, limit: ${limit}, after: ${after}`);
-  const endpoint = `/crm/v3/objects/deals?limit=${limit}${after ? `&after=${after}` : ''}&properties=dealname,hubspot_owner_id,email`;
-  return makeRequest(endpoint);
-}
+app.get('/', (req, res) => {
+  res.send('HubSpot Deal-Contact Sync Service is running');
+});
 
-let lastCheckedDeals = new Map();
+app.post('/webhook', async (req, res) => {
+  console.log('Webhook received:', JSON.stringify(req.body, null, 2));
+  try {
+    const { object_id } = req.body;
 
-async function checkForDealOwnerChanges() {
-  console.log("Checking for deal owner changes...");
-  let hasMore = true;
-  let after = undefined;
-  let changedDeals = [];
-
-  while (hasMore) {
-    const dealsResponse = await getAllDeals(100, after);
-    const deals = dealsResponse.results;
-
-    for (const deal of deals) {
-      const dealId = deal.id;
-      const currentOwner = deal.properties.hubspot_owner_id;
-      const lastKnownOwner = lastCheckedDeals.get(dealId);
-
-      if (lastKnownOwner && lastKnownOwner !== currentOwner) {
-        console.log(`Deal ${dealId} owner changed from ${lastKnownOwner} to ${currentOwner}`);
-        changedDeals.push(dealId);
-      }
-
-      lastCheckedDeals.set(dealId, currentOwner);
+    if (!object_id) {
+      return res.status(400).json({ error: 'Missing deal ID' });
     }
-
-    hasMore = dealsResponse.paging?.next?.after !== undefined;
-    after = dealsResponse.paging?.next?.after;
+    const result = await syncDealContactOwner(object_id);
+    console.log('Sync result:', result);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error('Error processing webhook:', error);
+    res.status(500).json({ error: error.message });
   }
+});
 
-  return changedDeals;
-}
-
-async function syncChangedDeals() {
-  const changedDeals = await checkForDealOwnerChanges();
-  console.log(`Found ${changedDeals.length} deals with changed owners`);
-
-  for (const dealId of changedDeals) {
-    try {
-      const result = await syncDealContactOwner(dealId);
-      console.log(`Synced deal ${dealId}:`, result);
-    } catch (error) {
-      console.error(`Error syncing deal ${dealId}:`, error);
-    }
+app.post('/sync-all-deals', async (req, res) => {
+  console.log('Starting sync for all deals');
+  try {
+    const results = await syncAllDealContactOwners();
+    console.log('Sync completed');
+    res.status(200).json(results);
+  } catch (error) {
+    console.error('Error syncing all deals:', error);
+    res.status(500).json({ error: error.message });
   }
-}
+});
 
-module.exports = { syncDealContactOwner, syncAllDealContactOwners, syncChangedDeals };
+app.post('/check-deal-changes', async (req, res) => {
+  console.log('Manually checking for deal changes');
+  try {
+    await syncChangedDeals();
+    res.status(200).json({ message: 'Check completed' });
+  } catch (error) {
+    console.error('Error checking for deal changes:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+const POLLING_INTERVAL = 5 * 60 * 1000; // 5 minutes in milliseconds
+setInterval(async () => {
+  console.log('Running scheduled check for deal changes');
+  try {
+    await syncChangedDeals();
+  } catch (error) {
+    console.error('Error in scheduled deal change check:', error);
+  }
+}, POLLING_INTERVAL);
+
+app.listen(port, '0.0.0.0', () => {
+  console.log(`Server running on port ${port}`);
+});
