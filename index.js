@@ -1,26 +1,22 @@
 const express = require('express');
-const { syncDealContactOwner } = require('./api/updateOwners');
-
+const { syncDealContactOwner, syncAllDealContactOwners } = require('./api/updateOwners');
 const app = express();
 const port = process.env.PORT || 3000;
 
 app.use(express.json());
 
 app.post('/webhook', async (req, res) => {
-    console.log('Webhook received:', JSON.stringify(req.body, null, 2));
+    // ... (keep the existing webhook endpoint)
+});
 
+app.post('/sync-all-deals', async (req, res) => {
+    console.log('Starting sync for all deals');
     try {
-        const { object_id } = req.body;
-
-        if (!object_id) {
-            return res.status(400).json({ error: 'Missing deal ID' });
-        }
-
-        const result = await syncDealContactOwner(object_id);
-        console.log('Sync result:', result);
-        res.status(200).json(result);
+        const results = await syncAllDealContactOwners();
+        console.log('Sync completed');
+        res.status(200).json(results);
     } catch (error) {
-        console.error('Error processing webhook:', error);
+        console.error('Error syncing all deals:', error);
         res.status(500).json({ error: error.message });
     }
 });

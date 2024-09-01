@@ -1,42 +1,57 @@
 const axios = require('axios');
-
 const API_KEY = process.env.HUBSPOT_API_KEY;
 const BASE_URL = 'https://api.hubapi.com';
 
-// Same helper functions as before...
-
-// Fetch deals updated in the last 10 minutes
-async function getRecentlyUpdatedDeals() {
-  console.log(`Fetching recently updated deals`);
-  const endpoint = `/crm/v3/objects/deals/search`;
-  const data = {
-    filterGroups: [{
-      filters: [{
-        propertyName: 'hs_lastmodifieddate',
-        operator: 'GT',
-        value: (new Date(Date.now() - 10 * 60 * 1000)).toISOString() // deals updated in the last 10 minutes
-      }]
-    }],
-    properties: ['dealname', 'hubspot_owner_id', 'email']
-  };
-  const response = await makeRequest(endpoint, 'POST', data);
-  return response.results;
+async function makeRequest(endpoint, method = 'GET', data = null) {
+  // ... (keep the existing makeRequest function)
 }
 
-// Sync owners for recently updated deals
-async function syncRecentlyUpdatedDeals() {
-  try {
-    const deals = await getRecentlyUpdatedDeals();
+async function getDealById(dealId) {
+  // ... (keep the existing getDealById function)
+}
+
+async function getContactByEmail(email) {
+  // ... (keep the existing getContactByEmail function)
+}
+
+async function updateContactOwner(contactId, ownerId) {
+  // ... (keep the existing updateContactOwner function)
+}
+
+async function syncDealContactOwner(dealId) {
+  // ... (keep the existing syncDealContactOwner function)
+}
+
+async function getAllDeals(limit = 100, after = undefined) {
+  console.log(`Fetching deals, limit: ${limit}, after: ${after}`);
+  const endpoint = `/crm/v3/objects/deals?limit=${limit}${after ? `&after=${after}` : ''}&properties=dealname,hubspot_owner_id,email`;
+  return makeRequest(endpoint);
+}
+
+async function syncAllDealContactOwners() {
+  let hasMore = true;
+  let after = undefined;
+  const results = [];
+
+  while (hasMore) {
+    const dealsResponse = await getAllDeals(100, after);
+    const deals = dealsResponse.results;
+
     for (const deal of deals) {
-      const dealId = deal.id;
-      console.log(`Processing deal ${dealId}`);
-      await syncDealContactOwner(dealId);
+      try {
+        const result = await syncDealContactOwner(deal.id);
+        results.push({ dealId: deal.id, ...result });
+      } catch (error) {
+        console.error(`Error processing deal ${deal.id}:`, error.message);
+        results.push({ dealId: deal.id, error: error.message });
+      }
     }
-  } catch (error) {
-    console.error('Error in syncRecentlyUpdatedDeals:', error.message);
-    throw error;
+
+    hasMore = dealsResponse.paging?.next?.after !== undefined;
+    after = dealsResponse.paging?.next?.after;
   }
+
+  return results;
 }
 
-// Schedule the script to run periodically
-syncRecentlyUpdatedDeals();
+module.exports = { syncDealContactOwner, syncAllDealContactOwners };
